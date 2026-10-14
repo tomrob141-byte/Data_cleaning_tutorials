@@ -1,0 +1,173 @@
+---
+title: "Lecture_4_data_cleaning"
+format: html
+editor: visual
+---
+
+## Quarto
+
+Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+
+## Running Code
+
+When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
+
+```{r}
+1 + 1
+```
+
+You can add options to executable code like this
+
+```{r}
+install.packages('ggridges')
+install.packages('patchwork')
+BiocManager::install('limma')
+install.packages("BiocManager")
+library(ggplot2)
+library(ggridges)
+library(ggpubr)
+library(patchwork)
+library(limma)
+library(matrixStats)
+
+```
+
+The `echo: false` option disables the printing of code (only output is displayed).
+
+```{r}
+gtex_lung_B1_tpm <- as.matrix(read.csv("../outputs/tables/GTEx_lung_B1_tpm.csv", 
+                                       row.names = 1))
+gtex_lung_C1_tpm <- as.matrix(read.csv("../outputs/tables/GTEx_lung_C1_tpm.csv", 
+                                       row.names = 1))
+mab <- read.csv("../outputs/tables/MindAndBody_compiled.csv", 
+                stringsAsFactors = T, row.names=1)
+```
+
+
+```{r}
+dim(gtex_lung_C1_tpm)
+dim(gtex_lung_B1_tpm)
+
+all(rownames(gtex_lung_B1_tpm) %in%(gtex_lung_C1_tpm))
+all(rownames(gtex_lung_B1_tpm) == rownames(gtex_lung_C1_tpm))
+```
+
+Re-order C1 and integrate
+```{r}
+gtex_lung_C1_tpm = gtex_lung_C1_tpm[rownames(gtex_lung_B1_tpm), ]
+all(rownames(gtex_lung_B1_tpm) == rownames(gtex_lung_C1_tpm))
+gtex_lung_TPM = cbind(gtex_lung_B1_tpm, gtex_lung_C1_tpm)
+dim(gtex_lung_TPM)
+```
+
+
+```{r}
+qplot(rowMeans(gtex_lung_TPM), rowVars(gtex_lung_TPM))
+qplot(rowMeans(log1p(gtex_lung_TPM)), rowVars(log1p(gtex_lung_TPM)))
+gtex_logTPM_scaled = t(scale(t(gtex_lung_TPM)))
+```
+
+```{r}
+gtex_logtpm <- log1p(gtex_lung_TPM)
+plot(rowMeans(gtex_logtpm), rowSds(gtex_logtpm))
+sampled_genes <- sample(rownames(gtex_logtpm), 20)
+
+boxplot(t(gtex_logtpm[sampled_genes,]))
+pca = prcomp(t(gtex_lung_TPM))
+```
+
+```{r}
+plot_pca <- function(x){
+  x <- log1p(x)    # variance stabilisation
+  hvg <- names(head(sort(rowSds(x), decreasing = T), 500))  # get top 5000 variable genes
+  pca <- prcomp(t(x[hvg,]),scale. = T)   # perform PCA transformation
+  qplot(x=PC1, y=PC2, colour = batch, data = pca$x)  # plot first 2 embeddings
+}
+
+batch = rep(c('B1', 'C1'), each=30)
+
+plot_pca(gtex_lung_TPM)
+```
+Clear difference between batches
+Regression needed to remove this effect
+Limma package performs this in one step
+
+```{r}
+gtex_lung_TPM_regressed = removeBatchEffect(gtex_lung_TPM, batch = batch)
+plot_pca(gtex_lung_TPM_regressed)
+```
+```{r}
+View(mab)
+```
+
+
+```{r}
+ggplot(mab,mapping = aes(x=awakenings, y=nr_of_shifts)) +
+  geom_point(aes(color = dreem_record_endpoints_version),
+             size = 2.5)+
+               labs(x='Awakening scores', y= 'Number of shifts', color ='Version') +
+  ggtitle('Scatterplot of awakenings vs sleep shifts')+
+  scale_color_manual(values = c('cornflowerblue','indianred'))+
+  theme_minimal() +
+  theme(axis.text = element_text(size = 10), 
+        axis.title = element_text(hjust = 0.5),
+        plot.title = element_text(hjust = 0.5),
+        legend.position = "bottom")+
+geom_smooth(method = 'lm', color='black')
+```
+
+Single continuous variable
+```{r}
+ggplot(data = mab, mapping = aes(x=rem_duration)) +
+  geom_density()
+ggplot(data = mab, mapping = aes(x=rem_duration)) +
+  geom_histogram(bins = 50)
+```
+
+```{r}
+ggplot(data = mab, mapping = aes(x=device)) +
+  geom_bar()
+```
+
+```{r}
+ggplot(data = mab, mapping= aes(x=device, y = average_respiration_rate)) +
+  geom_point()
+ggplot(data = mab, mapping= aes(x=device, y = average_respiration_rate)) +
+  geom_boxplot()
+ggplot(data = mab, mapping= aes(x=device, y = average_respiration_rate)) +
+  geom_violin() + geom_point()
+ggplot(data = mab, mapping= aes(x=device, y = average_respiration_rate)) +
+  geom_violin() +geom_jitter()
+```
+
+```{r}
+ggplot(data = mab, mapping= aes(x = average_respiration_rate, y=device)) +
+    geom_density_ridges()
+```
+
+
+```{r}
+ggplot(mab, mapping = aes(x=device, y=average_respiration_rate))+
+  geom_bar(stat='identity') +
+  stat_summary(geom='errorbar', width = 0.2)
+```
+
+```{r}
+ggplot(mab, aes(x=dreem_record_endpoints_version, 
+                y = average_respiration_rate)) +
+  geom_boxplot() +
+  stat_compare_means()
+```
+
+```{r}
+ggplot(mab, aes(x=device, y = average_respiration_rate)) +
+  geom_boxplot() +
+  stat_compare_means(method = "t.test",
+                             comparisons = list(c("a1c74e45-5ec4-4bd5-98f4-d75242f4f524",
+                                                  "2240fe9f-00fe-4dc2-8017-f2bb8f41f547"),
+                                                c("a1c74e45-5ec4-4bd5-98f4-d75242f4f524",
+                                                  "34f0f268-57c4-46aa-a448-852e9b577dc8"),
+                                                c("2240fe9f-00fe-4dc2-8017-f2bb8f41f547",
+                                                  "34f0f268-57c4-46aa-a448-852e9b577dc8")))
+```
+
